@@ -56,7 +56,7 @@ glm::vec3 lightPos = glm::vec3(0, 0, 7);
 
 glm::vec3 kdGround(0.334, 0.288, 0.635); // this is the ground color in the demo
 glm::vec3 kdCubes(0.86, 0.11, 0.31);
-glm::vec3 activeTetrisBlockCenter(0, 6, 0);//top center is (0, 6, 0)
+glm::vec3 activeBlockCenter(0, 6, 0);//top center is (0, 6, 0)
 int activeProgramIndex = 0;
 
 float gRotationAngle = 0.0f; // current rotation angle of the cube
@@ -68,7 +68,12 @@ int sideState = 0; // 0: front, 1: left, 2: back, 3: right
 int speedHolder = 0;
 int speedPerFrame = 0; //speed of the block, it will reset after reaching certain number and block will move down
 int speedLimit = 60; //speed limit of the block
-static bool cellOccupied[9][15][9] = {false}; // 9x15x9 grid, initially all cells are empty, including the floor
+static bool cellOccupied[9][16][9] = {false}; // 9x16x9 grid, initially all cells are empty, including the floor
+int score = 0;
+bool gameOver = false;
+std::string currentKey = "";
+int keyTime = 0;
+
 // Holds all state information relevant to a character as loaded using FreeType
 struct Character {
     GLuint TextureID;   // ID handle of the glyph texture
@@ -553,7 +558,7 @@ void drawTetrisBlock(glm::vec3 center) {
     for (int x = -1; x < 2; ++x) {
         for (int y = -1; y < 2; ++y) {
             for (int z = -1; z < 2; ++z) {
-                glm::mat4 matT = glm::translate(glm::mat4(1.0), glm::vec3(center.x+x, center.y+y, center.z+z));
+                glm::mat4 matT = glm::translate(glm::mat4(1.0), glm::vec3(center.x+x - 0.5, center.y+y, center.z+z - 0.5));
                 modelingMatrix = matT;
                 drawCube(false);
                 drawCubeEdges(false);
@@ -562,43 +567,13 @@ void drawTetrisBlock(glm::vec3 center) {
     }
 }
 
-void checkTetrisBlockValidationLeftRightBoundary(int change) {//left right move event from user, checking w.r.t. center of block
-    switch (sideState)
-    {
-    case 0: //front
-        if(activeTetrisBlockCenter.x + change < -3 || activeTetrisBlockCenter.x + change > 3) //from center of block
-            return;
-        activeTetrisBlockCenter.x += change;
-        break;
-    case 1: //left
-        if(activeTetrisBlockCenter.z + change < -3 || activeTetrisBlockCenter.z + change > 3) //from center of block
-            return;
-        activeTetrisBlockCenter.z += change;
-        break;
-    case 2: //back
-        //incrementing x w.r.t back side actually means decrementing x w.r.t. front side
-        if(activeTetrisBlockCenter.x - change < -3 || activeTetrisBlockCenter.x - change > 3) //from center of block
-            return;
-        activeTetrisBlockCenter.x -= change;
-        break;
-    case 3: //right
-        //incrementing z w.r.t right side actually means decrementing z w.r.t. left side
-        if(activeTetrisBlockCenter.z - change < -3 || activeTetrisBlockCenter.z - change > 3) //from center of block
-            return;
-        activeTetrisBlockCenter.z -= change;
-        break;
-    default:
-        break;
-    }
-}
-
-bool canMoveBlockDown(glm::vec3 activeTetrisBlockCenter) {
+bool canMoveBlockDown(glm::vec3 tempTetrisBlockCenter) {
         //for each cell of the block, mark the cell as occupied
         //if(activeTetrisBlockCenter.y == -6)
             //return false;
-        for(int x = activeTetrisBlockCenter.x - 1; x < activeTetrisBlockCenter.x + 2; x++){
-            for(int y = activeTetrisBlockCenter.y - 1; y < activeTetrisBlockCenter.y + 2; y++){
-                for(int z = activeTetrisBlockCenter.z - 1; z < activeTetrisBlockCenter.z + 2; z++){
+        for(int x = tempTetrisBlockCenter.x - 1; x < tempTetrisBlockCenter.x + 2; x++){
+            for(int y = tempTetrisBlockCenter.y - 1; y < tempTetrisBlockCenter.y + 2; y++){
+                for(int z = tempTetrisBlockCenter.z - 1; z < tempTetrisBlockCenter.z + 2; z++){
                     if(cellOccupied[x+4][y+8][z+4]) //if any cell is occupied, it cannot move down
                         return false;
                 }
@@ -609,6 +584,47 @@ bool canMoveBlockDown(glm::vec3 activeTetrisBlockCenter) {
     
 }
 
+void checkTetrisBlockValidationLeftRightBoundary(int change) {//left right move event from user, checking w.r.t. center of block
+    glm::vec3 tempCenter = {activeBlockCenter.x, activeBlockCenter.y, activeBlockCenter.z};
+    switch (sideState)
+    {
+        case 0: //front
+            if(activeBlockCenter.x + change >= -3 && activeBlockCenter.x + change <= 3)
+            {
+                tempCenter.x += change;
+                if (canMoveBlockDown(tempCenter))
+                    activeBlockCenter.x += change;
+            }
+            break;
+        case 1: //left
+            if(activeBlockCenter.z + change >= -3 && activeBlockCenter.z + change <= 3)
+            {
+                tempCenter.z += change;
+                if (canMoveBlockDown(tempCenter))
+                    activeBlockCenter.z += change;
+            }
+            break;
+        case 2: //back
+            //incrementing x w.r.t back side actually means decrementing x w.r.t. front side
+            if(activeBlockCenter.x - change >= -3 && activeBlockCenter.x - change <= 3) {
+                tempCenter.x -= change;
+                if (canMoveBlockDown(tempCenter))
+                    activeBlockCenter.x -= change;
+            }
+            break;
+        case 3: //right
+            //incrementing z w.r.t right side actually means decrementing z w.r.t. left side
+            if(activeBlockCenter.z - change >= -3 && activeBlockCenter.z - change <= 3) {
+                tempCenter.z -= change;
+                if (canMoveBlockDown(tempCenter))
+                    activeBlockCenter.z -= change;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 void display()
 {
     glClearColor(0, 0, 0, 1);
@@ -617,75 +633,147 @@ void display()
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     modelingMatrix = glm::mat4(1.0);
     speedHolder += speedPerFrame;
+    keyTime++;
 
-    glm::vec3 tempCenter = {activeTetrisBlockCenter.x, activeTetrisBlockCenter.y-1, activeTetrisBlockCenter.z};
-    if(speedHolder >= speedLimit){
-        if(canMoveBlockDown(tempCenter)){
-            activeTetrisBlockCenter.y -= 1;
-            speedHolder = 0;
-        }
-        else{
-            for(int x = activeTetrisBlockCenter.x - 1; x < activeTetrisBlockCenter.x + 2; x++){
-                for(int y = activeTetrisBlockCenter.y - 1; y < activeTetrisBlockCenter.y + 2; y++){
-                    for(int z = activeTetrisBlockCenter.z - 1; z < activeTetrisBlockCenter.z + 2; z++){
-                        cellOccupied[x+4][y+8][z+4] = true;
+    if (keyTime > 40) {
+        currentKey = "";
+        keyTime = 0;
+    }
+
+    if (!gameOver) {
+        glm::vec3 tempCenter = {activeBlockCenter.x, activeBlockCenter.y-1, activeBlockCenter.z};
+        if (speedHolder >= speedLimit) {
+            if(canMoveBlockDown(tempCenter)) {
+                activeBlockCenter.y -= 1;
+                speedHolder = 0;
+            }
+            else{
+                for(int x = activeBlockCenter.x - 1; x < activeBlockCenter.x + 2; x++){
+                    for(int y = activeBlockCenter.y - 1; y < activeBlockCenter.y + 2; y++){
+                        for(int z = activeBlockCenter.z - 1; z < activeBlockCenter.z + 2; z++){
+                            cellOccupied[x+4][y+8][z+4] = true;
+                        }
                     }
                 }
+                activeBlockCenter = {0, 6, 0};
+                if (!canMoveBlockDown(activeBlockCenter))
+                {
+                    gameOver = true;
+                }       
             }
-            activeTetrisBlockCenter = {0, 6, 0};
+            speedHolder = 0;
         }
-        speedHolder = 0;
-    }
-    //rotation smoothing
-    if(isRotatingLeft){
-        gRotationAngle += 3.0f;
-        if(gRotationAngle >= endingAngle){
-            gRotationAngle = startingAngle + 90.0f;
-            isRotatingLeft = false;
+
+        //rotation smoothing
+        if(isRotatingLeft){
+            gRotationAngle += 3.0f;
+            if(gRotationAngle >= endingAngle){
+                gRotationAngle = startingAngle + 90.0f;
+                isRotatingLeft = false;
+            }
+            if(gRotationAngle >= 360.0f)
+                gRotationAngle -= 360.0f;
         }
-        if(gRotationAngle >= 360.0f)
-            gRotationAngle -= 360.0f;
-    }
-    if(isRotatingRight){
-        gRotationAngle -= 3.0f;
-        if(gRotationAngle <= endingAngle){
-            gRotationAngle = startingAngle - 90.0f;
-            isRotatingRight = false;
-            cout << "closed rotation" << endl;
+        if(isRotatingRight){
+            gRotationAngle -= 3.0f;
+            if(gRotationAngle <= endingAngle){
+                gRotationAngle = startingAngle - 90.0f;
+                isRotatingRight = false;
+            }
+            if(gRotationAngle <= 0.0f){
+                gRotationAngle = 360.0f;
+            }
+                
         }
-        if(gRotationAngle <= 0.0f){
-            gRotationAngle = 360.0f;
-            cout << "set to 360: " << gRotationAngle << endl;
-        }
-            
+
+        // draw active block
+        drawTetrisBlock(activeBlockCenter);
+    } else {
+        renderText("Game Over!", gWidth / 2 - 175, gHeight / 2, 1.5, glm::vec3(1, 1, 0));
     }
     
-    //tetris floor occupied
+    // fill occupied array for floor
     for(int x = -4; x < 5; x++){
         for(int z = -4; z < 5; z++){
             cellOccupied[x+4][0][z+4] = true;
         }
     }
-    //tetris floor drawing
+
+    // draw floor
     for(int x = -4; x < 5; x++){
         for(int z = -4; z < 5; z++){
-            glm::mat4 matT = glm::translate(glm::mat4(1.0), glm::vec3(x, -7.5, z));
+            glm::mat4 matT = glm::translate(glm::mat4(1.0), glm::vec3(x - 0.5, -7.5, z - 0.5));
             modelingMatrix =  matT; 
 
             drawCube(true);
             drawCubeEdges(true);
         }
     }
-    
-    drawTetrisBlock(activeTetrisBlockCenter);
-    if(sideState == 0)
-        renderText("front", gWidth/2 - 55, gHeight/2 - 60, 0.75, glm::vec3(1, 1, 0));
-    else if(sideState == 1)
-        renderText("left", gWidth/2 - 55, gHeight/2 - 60, 0.75, glm::vec3(1, 1, 0));
-    else if(sideState == 2)
-        renderText("back", gWidth/2 - 55, gHeight/2 - 60, 0.75, glm::vec3(1, 1, 0));
-    else if(sideState == 3)
-        renderText("right", gWidth/2 - 55, gHeight/2 - 60, 0.75, glm::vec3(1, 1, 0));
+
+    // draw blocks on the ground
+    for (int x = 0; x < 9; x++) {
+        for (int y = 1; y < 16; y++) {
+            for (int z = 0; z < 9; z++) {
+                if (cellOccupied[x][y][z]) {
+                    glm::mat4 matT = glm::translate(glm::mat4(1.0), glm::vec3(x - 4.5, y - 8, z - 4.5));
+                    modelingMatrix = matT;
+                    drawCube(false);
+                    drawCubeEdges(false);
+                }
+            }
+        }
+    }
+
+    // check if there is a complete row, if so, remove the row and move the blocks above down and increase the score
+    for (int y = 1; y < 16; y += 3) {
+        for (int x = 0; x < 9; x++) {
+            for (int z = 0; z < 9; z++) {
+                if (!cellOccupied[x][y][z]) {
+                    goto next;
+                }
+            }
+        }
+
+        score += 243;
+
+        for (int x = 0; x < 9; x++) {
+            for (int _y = y; _y < y + 3; _y++) {
+                for (int z = 0; z < 9; z++) {
+                    cellOccupied[x][_y][z] = false;
+            }
+            }
+        }
+
+        for (int _y = y; _y < 16; _y++) {
+            for (int x = 0; x < 9; x++) {
+                for (int z = 0; z < 9; z++) {
+                    if (_y + 3 < 16)
+                        cellOccupied[x][_y][z] = cellOccupied[x][_y + 3][z];
+                    else
+                        cellOccupied[x][_y][z] = false;
+                }
+            }
+        }
+
+        next:;
+    }
+
+    // draw camera text
+    switch (sideState) {
+        case 0: { renderText("Front", gWidth * 0.1 + 10, (gHeight - 50), 0.5, glm::vec3(1, 1, 0)); break; }
+        case 1: { renderText("Left", gWidth * 0.1 + 10, (gHeight - 50), 0.5, glm::vec3(1, 1, 0)); break; }
+        case 2: { renderText("Back", gWidth * 0.1 + 10, (gHeight - 50), 0.5, glm::vec3(1, 1, 0)); break; }
+        case 3: { renderText("Right", gWidth * 0.1 + 10, (gHeight - 50), 0.5, glm::vec3(1, 1, 0)); break; }
+    }
+
+    // draw key text
+    renderText(currentKey, gWidth * 0.1 + 10, (gHeight - 100), 0.5, glm::vec3(1, 0, 0));
+
+    // draw score text
+    std::ostringstream oss;
+    oss << "Score: " << score;
+    std::string scoreText = oss.str();
+    renderText(scoreText, gWidth - 150, (gHeight - 50), 0.5, glm::vec3(1, 1, 0));
 
     assert(glGetError() == GL_NO_ERROR);
 }
@@ -696,46 +784,61 @@ void keyboard(GLFWwindow* window, int key, int scancode, int action, int mods)
     {
         glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
-    else if (key == GLFW_KEY_A && action == GLFW_PRESS)
+    else if (!gameOver && key == GLFW_KEY_A && action == GLFW_PRESS)
 	{
 		checkTetrisBlockValidationLeftRightBoundary(-1);
+        keyTime = 0;
+        currentKey = "A";
 	}
-    else if (key == GLFW_KEY_D && action == GLFW_PRESS)
+    else if (!gameOver && key == GLFW_KEY_D && action == GLFW_PRESS)
     {
         checkTetrisBlockValidationLeftRightBoundary(1);
+        keyTime = 0;
+        currentKey = "D";
     }
-    else if (key == GLFW_KEY_H && action == GLFW_PRESS)
-    {
-        if(gRotationAngle == 360.0f)
-            gRotationAngle = 0.0f;
-        startingAngle = gRotationAngle;
-        endingAngle = gRotationAngle + 90.0f;
-        isRotatingLeft = true;
-        sideState ++;
-        if(sideState == 4)
-            sideState = 0;
+    else if (!gameOver && key == GLFW_KEY_H && action == GLFW_PRESS) {
+        if (!isRotatingLeft && !isRotatingRight) {
+            if(gRotationAngle == 360.0f)
+                gRotationAngle = 0.0f;
+            startingAngle = gRotationAngle;
+            endingAngle = gRotationAngle + 90.0f;
+            isRotatingLeft = true;
+            sideState = (sideState + 1) % 4;
+
+            keyTime = 0;
+            currentKey = "H";
+        }
     }
-    else if( key == GLFW_KEY_K && action == GLFW_PRESS)
-    {
-        if(gRotationAngle == 0.0f)
-            gRotationAngle = 360.0f;
-        startingAngle = gRotationAngle;
-        endingAngle = gRotationAngle - 90.0f;
-        isRotatingRight = true;
-        sideState--;
-        if(sideState == -1)
-            sideState = 3;
+    else if (!gameOver && key == GLFW_KEY_K && action == GLFW_PRESS) {
+        if (!isRotatingRight && !isRotatingLeft) {
+            if(gRotationAngle == 0.0f)
+                gRotationAngle = 360.0f;
+            startingAngle = gRotationAngle;
+            endingAngle = gRotationAngle - 90.0f;
+            isRotatingRight = true;
+
+            sideState--;
+            if (sideState < 0)
+                sideState += 4;
+
+            keyTime = 0;
+            currentKey = "K";
+        }
     }
-    else if(key == GLFW_KEY_S && action == GLFW_PRESS){
+    else if (!gameOver && key == GLFW_KEY_S && action == GLFW_PRESS) {
         speedPerFrame += 1;
+
+        keyTime = 0;
+        currentKey = "S";
     }
-    else if(key == GLFW_KEY_W && action == GLFW_PRESS){
+    else if (!gameOver && key == GLFW_KEY_W && action == GLFW_PRESS) {
         if(speedPerFrame > 0)
             speedPerFrame -= 1;
-    }
-    
-}
 
+        keyTime = 0;
+        currentKey = "W";
+    }
+}
 
 void mainLoop(GLFWwindow* window)
 {
