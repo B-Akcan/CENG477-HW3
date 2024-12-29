@@ -56,9 +56,19 @@ glm::vec3 lightPos = glm::vec3(0, 0, 7);
 
 glm::vec3 kdGround(0.334, 0.288, 0.635); // this is the ground color in the demo
 glm::vec3 kdCubes(0.86, 0.11, 0.31);
-
+glm::vec3 activeTetrisBlockCenter(0, 6, 0);//top center is (0, 6, 0)
 int activeProgramIndex = 0;
 
+float gRotationAngle = 0.0f; // current rotation angle of the cube
+float startingAngle = 0.0f; 
+float endingAngle = 90.0f;
+bool isRotatingLeft = false; //objects currently rotating
+bool isRotatingRight = false;
+int sideState = 0; // 0: front, 1: left, 2: back, 3: right
+int speedHolder = 0;
+int speedPerFrame = 0; //speed of the block, it will reset after reaching certain number and block will move down
+int speedLimit = 60; //speed limit of the block
+static bool cellOccupied[9][15][9] = {false}; // 9x15x9 grid, initially all cells are empty, including the floor
 // Holds all state information relevant to a character as loaded using FreeType
 struct Character {
     GLuint TextureID;   // ID handle of the glyph texture
@@ -404,42 +414,7 @@ void init()
     initFonts(gWidth, gHeight);
 }
 
-void drawCube(bool isFloor)
-{
-	glUseProgram(gProgram[0]);
-    
-    glUniformMatrix4fv(projectionMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(projectionMatrix));
-    glUniformMatrix4fv(viewingMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(viewingMatrix));
-    glUniformMatrix4fv(modelingMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
-    glUniform3fv(eyePosLoc[0], 1, glm::value_ptr(eyePos));
 
-    if (isFloor)
-        glUniform3fv(kdLoc[0], 1, glm::value_ptr(kdGround));
-    else
-        glUniform3fv(kdLoc[0], 1, glm::value_ptr(kdCubes));
-
-	glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
-}
-
-void drawCubeEdges()
-{
-    glLineWidth(3);
-
-	glUseProgram(gProgram[1]);
-
-    glUniformMatrix4fv(projectionMatrixLoc[1], 1, GL_FALSE, glm::value_ptr(projectionMatrix));
-    glUniformMatrix4fv(viewingMatrixLoc[1], 1, GL_FALSE, glm::value_ptr(viewingMatrix));
-    glUniformMatrix4fv(modelingMatrixLoc[1], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
-    glUniform3fv(eyePosLoc[1], 1, glm::value_ptr(eyePos));
-
-    glm::vec3 white(1.0, 1.0, 1.0);
-    glUniform3fv(kdLoc[1], 1, glm::value_ptr(white));
-
-    for (int i = 0; i < 6; ++i)
-    {
-	    glDrawElements(GL_LINE_LOOP, 4, GL_UNSIGNED_INT, BUFFER_OFFSET(gTriangleIndexDataSizeInBytes + i * 4 * sizeof(GLuint)));
-    }
-}
 
 void renderText(const std::string& text, GLfloat x, GLfloat y, GLfloat scale, glm::vec3 color)
 {
@@ -490,35 +465,6 @@ void renderText(const std::string& text, GLfloat x, GLfloat y, GLfloat scale, gl
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void display()
-{
-    glClearColor(0, 0, 0, 1);
-    glClearDepth(1.0f);
-    glClearStencil(0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-
-    for(int x = -4; x < 5; x++){
-        for(int z = -4; z < 5; z++){
-            glm::mat4 matT = glm::translate(glm::mat4(1.0), glm::vec3(x, -8.5, z));
-            modelingMatrix =  matT;
-
-            drawCube(true);
-            drawCubeEdges();
-        }
-    }
-    
-    
-    glm::mat4 matT =  glm::translate(glm::mat4(1.f), glm::vec3(-0.5, -0.5, -0.5));
-    glm::mat4 matR = glm::rotate<float>(glm::mat4(1.0), (-45. / 180.) * M_PI, glm::vec3(1.0, 0.0, 0.0));
-    modelingMatrix =  matT;
-
-    drawCube(false);
-    drawCubeEdges();
-
-    renderText("tetrisGL", gWidth/2 - 55, gHeight/2 - 60, 0.75, glm::vec3(1, 1, 0));
-
-    assert(glGetError() == GL_NO_ERROR);
-}
 
 void reshape(GLFWwindow* window, int w, int h)
 {
@@ -538,6 +484,7 @@ void reshape(GLFWwindow* window, int w, int h)
     // always look toward (0, 0, 0)
 	viewingMatrix = glm::lookAt(eyePos, glm::vec3(0, 0, 0), glm::vec3(0, 1, 0));
 
+
     for (int i = 0; i < 2; ++i)
     {
         glUseProgram(gProgram[i]);
@@ -546,19 +493,254 @@ void reshape(GLFWwindow* window, int w, int h)
     }
 }
 
+void drawCube(bool isFloor)
+{
+    glm::mat4 oldMat = modelingMatrix;
+    if (isFloor) {
+        glm::mat4 scaledMat = modelingMatrix * glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 0.5f, 1.0f));
+        modelingMatrix = scaledMat;
+    }
+    glUseProgram(gProgram[0]);
+    glm::mat4 matR = glm::rotate(glm::mat4(1.0), glm::radians(gRotationAngle), glm::vec3(0, 1, 0));
+    modelingMatrix = matR * modelingMatrix;
+    //rotation should be applied as last operation, therefore it is the leftmost operation of overall
+
+
+    glUniformMatrix4fv(projectionMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+    glUniformMatrix4fv(viewingMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(viewingMatrix));
+    glUniformMatrix4fv(modelingMatrixLoc[0], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
+    glUniform3fv(eyePosLoc[0], 1, glm::value_ptr(eyePos));
+
+    if (isFloor)
+        glUniform3fv(kdLoc[0], 1, glm::value_ptr(kdGround));
+    else
+        glUniform3fv(kdLoc[0], 1, glm::value_ptr(kdCubes));
+
+    glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+
+    modelingMatrix = oldMat; // restore the modeling matrix
+}
+
+void drawCubeEdges(bool isFloor)
+{
+    glm::mat4 oldMat = modelingMatrix;
+    if (isFloor) {
+        glm::mat4 scaledMat = modelingMatrix * glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, 0.5f, 1.0f));
+        modelingMatrix = scaledMat;
+    }
+    glm::mat4 matR = glm::rotate(glm::mat4(1.0), glm::radians(gRotationAngle), glm::vec3(0, 1, 0));
+    modelingMatrix = matR * modelingMatrix;
+
+    glLineWidth(3);
+
+	glUseProgram(gProgram[1]);
+    glUniformMatrix4fv(projectionMatrixLoc[1], 1, GL_FALSE, glm::value_ptr(projectionMatrix));
+    glUniformMatrix4fv(viewingMatrixLoc[1], 1, GL_FALSE, glm::value_ptr(viewingMatrix));
+    glUniformMatrix4fv(modelingMatrixLoc[1], 1, GL_FALSE, glm::value_ptr(modelingMatrix));
+    glUniform3fv(eyePosLoc[1], 1, glm::value_ptr(eyePos));
+
+    glm::vec3 white(1.0, 1.0, 1.0);
+    glUniform3fv(kdLoc[1], 1, glm::value_ptr(white));
+
+    for (int i = 0; i < 6; ++i)
+    {
+	    glDrawElements(GL_LINE_LOOP, 4, GL_UNSIGNED_INT, BUFFER_OFFSET(gTriangleIndexDataSizeInBytes + i * 4 * sizeof(GLuint)));
+    }
+    modelingMatrix = oldMat; // restore the modeling matrix
+}
+
+void drawTetrisBlock(glm::vec3 center) {
+    for (int x = -1; x < 2; ++x) {
+        for (int y = -1; y < 2; ++y) {
+            for (int z = -1; z < 2; ++z) {
+                glm::mat4 matT = glm::translate(glm::mat4(1.0), glm::vec3(center.x+x, center.y+y, center.z+z));
+                modelingMatrix = matT;
+                drawCube(false);
+                drawCubeEdges(false);
+            }
+        }
+    }
+}
+
+void checkTetrisBlockValidationLeftRightBoundary(int change) {//left right move event from user, checking w.r.t. center of block
+    switch (sideState)
+    {
+    case 0: //front
+        if(activeTetrisBlockCenter.x + change < -3 || activeTetrisBlockCenter.x + change > 3) //from center of block
+            return;
+        activeTetrisBlockCenter.x += change;
+        break;
+    case 1: //left
+        if(activeTetrisBlockCenter.z + change < -3 || activeTetrisBlockCenter.z + change > 3) //from center of block
+            return;
+        activeTetrisBlockCenter.z += change;
+        break;
+    case 2: //back
+        //incrementing x w.r.t back side actually means decrementing x w.r.t. front side
+        if(activeTetrisBlockCenter.x - change < -3 || activeTetrisBlockCenter.x - change > 3) //from center of block
+            return;
+        activeTetrisBlockCenter.x -= change;
+        break;
+    case 3: //right
+        //incrementing z w.r.t right side actually means decrementing z w.r.t. left side
+        if(activeTetrisBlockCenter.z - change < -3 || activeTetrisBlockCenter.z - change > 3) //from center of block
+            return;
+        activeTetrisBlockCenter.z -= change;
+        break;
+    default:
+        break;
+    }
+}
+
+bool canMoveBlockDown(glm::vec3 activeTetrisBlockCenter) {
+        //for each cell of the block, mark the cell as occupied
+        //if(activeTetrisBlockCenter.y == -6)
+            //return false;
+        for(int x = activeTetrisBlockCenter.x - 1; x < activeTetrisBlockCenter.x + 2; x++){
+            for(int y = activeTetrisBlockCenter.y - 1; y < activeTetrisBlockCenter.y + 2; y++){
+                for(int z = activeTetrisBlockCenter.z - 1; z < activeTetrisBlockCenter.z + 2; z++){
+                    if(cellOccupied[x+4][y+8][z+4]) //if any cell is occupied, it cannot move down
+                        return false;
+                }
+            }
+        }
+    
+    return true;
+    
+}
+
+void display()
+{
+    glClearColor(0, 0, 0, 1);
+    glClearDepth(1.0f);
+    glClearStencil(0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    modelingMatrix = glm::mat4(1.0);
+    speedHolder += speedPerFrame;
+
+    glm::vec3 tempCenter = {activeTetrisBlockCenter.x, activeTetrisBlockCenter.y-1, activeTetrisBlockCenter.z};
+    if(speedHolder >= speedLimit){
+        if(canMoveBlockDown(tempCenter)){
+            activeTetrisBlockCenter.y -= 1;
+            speedHolder = 0;
+        }
+        else{
+            for(int x = activeTetrisBlockCenter.x - 1; x < activeTetrisBlockCenter.x + 2; x++){
+                for(int y = activeTetrisBlockCenter.y - 1; y < activeTetrisBlockCenter.y + 2; y++){
+                    for(int z = activeTetrisBlockCenter.z - 1; z < activeTetrisBlockCenter.z + 2; z++){
+                        cellOccupied[x+4][y+8][z+4] = true;
+                    }
+                }
+            }
+            activeTetrisBlockCenter = {0, 6, 0};
+        }
+        speedHolder = 0;
+    }
+    //rotation smoothing
+    if(isRotatingLeft){
+        gRotationAngle += 3.0f;
+        if(gRotationAngle >= endingAngle){
+            gRotationAngle = startingAngle + 90.0f;
+            isRotatingLeft = false;
+        }
+        if(gRotationAngle >= 360.0f)
+            gRotationAngle -= 360.0f;
+    }
+    if(isRotatingRight){
+        gRotationAngle -= 3.0f;
+        if(gRotationAngle <= endingAngle){
+            gRotationAngle = startingAngle - 90.0f;
+            isRotatingRight = false;
+            cout << "closed rotation" << endl;
+        }
+        if(gRotationAngle <= 0.0f){
+            gRotationAngle = 360.0f;
+            cout << "set to 360: " << gRotationAngle << endl;
+        }
+            
+    }
+    
+    //tetris floor occupied
+    for(int x = -4; x < 5; x++){
+        for(int z = -4; z < 5; z++){
+            cellOccupied[x+4][0][z+4] = true;
+        }
+    }
+    //tetris floor drawing
+    for(int x = -4; x < 5; x++){
+        for(int z = -4; z < 5; z++){
+            glm::mat4 matT = glm::translate(glm::mat4(1.0), glm::vec3(x, -7.5, z));
+            modelingMatrix =  matT; 
+
+            drawCube(true);
+            drawCubeEdges(true);
+        }
+    }
+    
+    drawTetrisBlock(activeTetrisBlockCenter);
+    if(sideState == 0)
+        renderText("front", gWidth/2 - 55, gHeight/2 - 60, 0.75, glm::vec3(1, 1, 0));
+    else if(sideState == 1)
+        renderText("left", gWidth/2 - 55, gHeight/2 - 60, 0.75, glm::vec3(1, 1, 0));
+    else if(sideState == 2)
+        renderText("back", gWidth/2 - 55, gHeight/2 - 60, 0.75, glm::vec3(1, 1, 0));
+    else if(sideState == 3)
+        renderText("right", gWidth/2 - 55, gHeight/2 - 60, 0.75, glm::vec3(1, 1, 0));
+
+    assert(glGetError() == GL_NO_ERROR);
+}
+
 void keyboard(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
     if ((key == GLFW_KEY_Q || key == GLFW_KEY_ESCAPE) && action == GLFW_PRESS)
     {
         glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
+    else if (key == GLFW_KEY_A && action == GLFW_PRESS)
+	{
+		checkTetrisBlockValidationLeftRightBoundary(-1);
+	}
+    else if (key == GLFW_KEY_D && action == GLFW_PRESS)
+    {
+        checkTetrisBlockValidationLeftRightBoundary(1);
+    }
+    else if (key == GLFW_KEY_H && action == GLFW_PRESS)
+    {
+        if(gRotationAngle == 360.0f)
+            gRotationAngle = 0.0f;
+        startingAngle = gRotationAngle;
+        endingAngle = gRotationAngle + 90.0f;
+        isRotatingLeft = true;
+        sideState ++;
+        if(sideState == 4)
+            sideState = 0;
+    }
+    else if( key == GLFW_KEY_K && action == GLFW_PRESS)
+    {
+        if(gRotationAngle == 0.0f)
+            gRotationAngle = 360.0f;
+        startingAngle = gRotationAngle;
+        endingAngle = gRotationAngle - 90.0f;
+        isRotatingRight = true;
+        sideState--;
+        if(sideState == -1)
+            sideState = 3;
+    }
+    else if(key == GLFW_KEY_S && action == GLFW_PRESS){
+        speedPerFrame += 1;
+    }
+    else if(key == GLFW_KEY_W && action == GLFW_PRESS){
+        if(speedPerFrame > 0)
+            speedPerFrame -= 1;
+    }
+    
 }
+
 
 void mainLoop(GLFWwindow* window)
 {
     while (!glfwWindowShouldClose(window))
     {
-        //displayFloor();
         display();
         glfwSwapBuffers(window);
         glfwPollEvents();
